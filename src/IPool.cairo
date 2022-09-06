@@ -12,4 +12,10 @@ namespace IPool:
 
     func balanceOf(token_address : felt, account_id : felt) -> (res : Uint256):
     end
+
+    func flashloanPrice() -> (res : Uint256):
+    end
+
+    func flashloan(amount : Uint256, token_address : felt, receiver_address : felt) -> ():
+    end
 end

@@ -4,6 +4,7 @@ from starkware.cairo.common.math import split_felt
 from starkware.cairo.common.uint256 import Uint256, uint256_add, uint256_sub
 from openzeppelin.token.erc20.IERC20 import IERC20
 from src.IPool import IPool
+from src.IReceiver import IReceiver
 
 func uint256_from_felt{syscall_ptr : felt*, range_check_ptr}(f : felt) -> (f_uint : Uint256):
     alloc_locals
@@ -35,11 +36,15 @@ func __setup__{syscall_ptr : felt*, range_check_ptr}():
             "recipient": context.user3_address
         }).contract_address
 
-        context.pool_address = deploy_contract("./src/pool.cairo", []).contract_address
+        context.pool_address = deploy_contract("./src/pool.cairo", {
+            "flashloan_price_value": 10
+        }).contract_address
+        context.receiver_address = deploy_contract("./tests/stubs/receiver.cairo", []).contract_address
 
         def setup_ids(context, ids):
             ids.token_address = context.token_address
             ids.pool_address = context.pool_address
+            ids.receiver_address = context.receiver_address
             ids.initial_value = context.initial_value
             ids.user1_address = context.user1_address
             ids.user2_address = context.user2_address
@@ -50,6 +55,7 @@ func __setup__{syscall_ptr : felt*, range_check_ptr}():
 
     local token_address : felt
     local pool_address : felt
+    local receiver_address : felt
     local user1_address : felt
     local user2_address : felt
     local user3_address : felt
@@ -61,6 +67,11 @@ func __setup__{syscall_ptr : felt*, range_check_ptr}():
 
     let (res_transfer1) = IERC20.transfer(token_address, user1_address, initial_value_uint)
     let (res_transfer2) = IERC20.transfer(token_address, user2_address, initial_value_uint)
+
+    let (flashloan_price_value) = IPool.flashloanPrice(pool_address)
+    let (res_transfer_receiver) = IERC20.transfer(
+        token_address, receiver_address, flashloan_price_value
+    )
 
     %{ stop_prank_callable() %}
 
@@ -135,12 +146,29 @@ func withdraw_from_pool{syscall_ptr : felt*, range_check_ptr}(
     return ()
 end
 
+func flashloan_from_pool{syscall_ptr : felt*, range_check_ptr}(
+    receiver_address : felt, pool_address : felt, token_address : felt, amount : Uint256
+):
+    let (res_balanceOfPool_start) = IERC20.balanceOf(token_address, pool_address)
+    let (flashloan_price_value) = IPool.flashloanPrice(pool_address)
+
+    IPool.flashloan(pool_address, amount, token_address, receiver_address)
+
+    let (expected_pool_value, _) = uint256_add(res_balanceOfPool_start, flashloan_price_value)
+    let (res_balanceOfPool_end) = IERC20.balanceOf(token_address, pool_address)
+    assert res_balanceOfPool_end.low = expected_pool_value.low
+    assert res_balanceOfPool_end.high = expected_pool_value.high
+
+    return ()
+end
+
 @external
 func test_pool{syscall_ptr : felt*, range_check_ptr}():
     alloc_locals
 
     local token_address : felt
     local pool_address : felt
+    local receiver_address : felt
     local user1_address : felt
     local user2_address : felt
     local user3_address : felt
@@ -150,6 +178,10 @@ func test_pool{syscall_ptr : felt*, range_check_ptr}():
 
     deposit_into_pool(pool_address, token_address, user1_address, initial_value_uint)
     deposit_into_pool(pool_address, token_address, user2_address, initial_value_uint)
+
+    let (flashloan_value, _) = uint256_add(initial_value_uint, initial_value_uint)
+
+    flashloan_from_pool(receiver_address, pool_address, token_address, flashloan_value)
 
     withdraw_from_pool(pool_address, token_address, user1_address, initial_value_uint)
     withdraw_from_pool(pool_address, token_address, user2_address, initial_value_uint)
