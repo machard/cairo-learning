@@ -72,6 +72,7 @@ func deposit_into_pool{syscall_ptr : felt*, range_check_ptr}(
 ):
     let (res_balanceOfPool_start) = IERC20.balanceOf(token_address, pool_address)
     let (res_balanceOfUser_start) = IERC20.balanceOf(token_address, user_address)
+    let (res_balanceOfUserInPool_start) = IPool.balanceOf(pool_address, token_address, user_address)
 
     %{ stop_prank_callable = start_prank(ids.user_address, ids.token_address) %}
 
@@ -95,6 +96,11 @@ func deposit_into_pool{syscall_ptr : felt*, range_check_ptr}(
     assert res_balanceOfUser_end.low = expected_user_value.low
     assert res_balanceOfUser_end.high = expected_user_value.high
 
+    let (expected_userinpool_value, _) = uint256_add(res_balanceOfUserInPool_start, amount)
+    let (res_balanceOfUserInPool_end) = IPool.balanceOf(pool_address, token_address, user_address)
+    assert res_balanceOfUserInPool_end.low = expected_userinpool_value.low
+    assert res_balanceOfUserInPool_end.high = expected_userinpool_value.high
+
     return ()
 end
 
@@ -103,6 +109,7 @@ func withdraw_from_pool{syscall_ptr : felt*, range_check_ptr}(
 ):
     let (res_balanceOfPool_start) = IERC20.balanceOf(token_address, pool_address)
     let (res_balanceOfUser_start) = IERC20.balanceOf(token_address, user_address)
+    let (res_balanceOfUserInPool_start) = IPool.balanceOf(pool_address, token_address, user_address)
 
     %{ stop_prank_callable = start_prank(ids.user_address, ids.pool_address) %}
 
@@ -119,6 +126,11 @@ func withdraw_from_pool{syscall_ptr : felt*, range_check_ptr}(
     let (res_balanceOfUser_end) = IERC20.balanceOf(token_address, user_address)
     assert res_balanceOfUser_end.low = expected_user_value.low
     assert res_balanceOfUser_end.high = expected_user_value.high
+
+    let (expected_userinpool_value) = uint256_sub(res_balanceOfUserInPool_start, amount)
+    let (res_balanceOfUserInPool_end) = IPool.balanceOf(pool_address, token_address, user_address)
+    assert res_balanceOfUserInPool_end.low = expected_userinpool_value.low
+    assert res_balanceOfUserInPool_end.high = expected_userinpool_value.high
 
     return ()
 end
