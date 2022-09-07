@@ -1,7 +1,12 @@
 %lang starknet
 
 from starkware.cairo.common.math import split_felt
-from starkware.cairo.common.uint256 import Uint256, uint256_add, uint256_sub
+from starkware.cairo.common.uint256 import (
+    Uint256,
+    uint256_add,
+    uint256_sub,
+    uint256_unsigned_div_rem,
+)
 from openzeppelin.token.erc20.IERC20 import IERC20
 from src.IPool import IPool
 from src.IReceiver import IReceiver
@@ -80,10 +85,12 @@ end
 
 func deposit_into_pool{syscall_ptr : felt*, range_check_ptr}(
     pool_address : felt, token_address : felt, user_address : felt, amount : Uint256
-):
+) -> (minted_shares : Uint256):
+    alloc_locals
+
     let (res_balanceOfPool_start) = IERC20.balanceOf(token_address, pool_address)
     let (res_balanceOfUser_start) = IERC20.balanceOf(token_address, user_address)
-    let (res_balanceOfUserInPool_start) = IPool.balanceOf(pool_address, token_address, user_address)
+    let (res_sharesOfUserInPool_start) = IPool.shares(pool_address, user_address, token_address)
 
     %{ stop_prank_callable = start_prank(ids.user_address, ids.token_address) %}
 
@@ -93,7 +100,7 @@ func deposit_into_pool{syscall_ptr : felt*, range_check_ptr}(
 
     %{ stop_prank_callable = start_prank(ids.user_address, ids.pool_address) %}
 
-    IPool.deposit(pool_address, amount, token_address)
+    let (local minted_shares) = IPool.deposit(pool_address, amount, token_address)
 
     %{ stop_prank_callable() %}
 
@@ -107,43 +114,47 @@ func deposit_into_pool{syscall_ptr : felt*, range_check_ptr}(
     assert res_balanceOfUser_end.low = expected_user_value.low
     assert res_balanceOfUser_end.high = expected_user_value.high
 
-    let (expected_userinpool_value, _) = uint256_add(res_balanceOfUserInPool_start, amount)
-    let (res_balanceOfUserInPool_end) = IPool.balanceOf(pool_address, token_address, user_address)
-    assert res_balanceOfUserInPool_end.low = expected_userinpool_value.low
-    assert res_balanceOfUserInPool_end.high = expected_userinpool_value.high
+    let (expected_usersharesinpool_value, _) = uint256_add(
+        res_sharesOfUserInPool_start, minted_shares
+    )
+    let (res_sharesOfUserInPool_end) = IPool.shares(pool_address, user_address, token_address)
+    assert res_sharesOfUserInPool_end.low = expected_usersharesinpool_value.low
+    assert res_sharesOfUserInPool_end.high = expected_usersharesinpool_value.high
 
-    return ()
+    return (minted_shares)
 end
 
 func withdraw_from_pool{syscall_ptr : felt*, range_check_ptr}(
-    pool_address : felt, token_address : felt, user_address : felt, amount : Uint256
-):
+    pool_address : felt, token_address : felt, user_address : felt, shares : Uint256
+) -> (amount_returned : Uint256):
+    alloc_locals
+
     let (res_balanceOfPool_start) = IERC20.balanceOf(token_address, pool_address)
     let (res_balanceOfUser_start) = IERC20.balanceOf(token_address, user_address)
-    let (res_balanceOfUserInPool_start) = IPool.balanceOf(pool_address, token_address, user_address)
+    let (res_sharesOfUserInPool_start) = IPool.shares(pool_address, user_address, token_address)
 
     %{ stop_prank_callable = start_prank(ids.user_address, ids.pool_address) %}
 
-    IPool.withdraw(pool_address, amount, token_address)
+    let (local amount_returned) = IPool.withdraw(pool_address, shares, token_address)
 
     %{ stop_prank_callable() %}
 
-    let (expected_pool_value) = uint256_sub(res_balanceOfPool_start, amount)
+    let (expected_pool_value) = uint256_sub(res_balanceOfPool_start, amount_returned)
     let (res_balanceOfPool_end) = IERC20.balanceOf(token_address, pool_address)
     assert res_balanceOfPool_end.low = expected_pool_value.low
     assert res_balanceOfPool_end.high = expected_pool_value.high
 
-    let (expected_user_value, _) = uint256_add(res_balanceOfUser_start, amount)
+    let (expected_user_value, _) = uint256_add(res_balanceOfUser_start, amount_returned)
     let (res_balanceOfUser_end) = IERC20.balanceOf(token_address, user_address)
     assert res_balanceOfUser_end.low = expected_user_value.low
     assert res_balanceOfUser_end.high = expected_user_value.high
 
-    let (expected_userinpool_value) = uint256_sub(res_balanceOfUserInPool_start, amount)
-    let (res_balanceOfUserInPool_end) = IPool.balanceOf(pool_address, token_address, user_address)
-    assert res_balanceOfUserInPool_end.low = expected_userinpool_value.low
-    assert res_balanceOfUserInPool_end.high = expected_userinpool_value.high
+    let (expected_usersharesinpool_value) = uint256_sub(res_sharesOfUserInPool_start, shares)
+    let (res_sharesOfUserInPool_end) = IPool.shares(pool_address, user_address, token_address)
+    assert res_sharesOfUserInPool_end.low = expected_usersharesinpool_value.low
+    assert res_sharesOfUserInPool_end.high = expected_usersharesinpool_value.high
 
-    return ()
+    return (amount_returned)
 end
 
 func flashloan_from_pool{syscall_ptr : felt*, range_check_ptr}(
@@ -176,15 +187,34 @@ func test_pool{syscall_ptr : felt*, range_check_ptr}():
     %{ context.setup_ids(context, ids) %}
     let (local initial_value_uint) = uint256_from_felt(initial_value)
 
-    deposit_into_pool(pool_address, token_address, user1_address, initial_value_uint)
-    deposit_into_pool(pool_address, token_address, user2_address, initial_value_uint)
+    let (local shares_user1) = deposit_into_pool(
+        pool_address, token_address, user1_address, initial_value_uint
+    )
+    let (local shares_user2) = deposit_into_pool(
+        pool_address, token_address, user2_address, initial_value_uint
+    )
 
     let (flashloan_value, _) = uint256_add(initial_value_uint, initial_value_uint)
 
     flashloan_from_pool(receiver_address, pool_address, token_address, flashloan_value)
 
-    withdraw_from_pool(pool_address, token_address, user1_address, initial_value_uint)
-    withdraw_from_pool(pool_address, token_address, user2_address, initial_value_uint)
+    let (amount_returned_user1) = withdraw_from_pool(
+        pool_address, token_address, user1_address, shares_user1
+    )
+    let (amount_returned_user2) = withdraw_from_pool(
+        pool_address, token_address, user2_address, shares_user2
+    )
+
+    let (flashloan_price_value) = IPool.flashloanPrice(pool_address)
+    let (half_flashloan_price_value, _) = uint256_unsigned_div_rem(
+        flashloan_price_value, Uint256(2, 0)
+    )
+    let (expected_value, _) = uint256_add(initial_value_uint, half_flashloan_price_value)
+
+    assert amount_returned_user1.low = expected_value.low
+    assert amount_returned_user1.high = expected_value.high
+    assert amount_returned_user2.low = expected_value.low
+    assert amount_returned_user2.high = expected_value.high
 
     return ()
 end
