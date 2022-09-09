@@ -10,3 +10,4 @@ The fee generated from the flashloans are distributed proportionnally to the dep
 - add more test scenarios (specifically failing scenarios)
 - check usage of locals/tempvar
 - Redo with ERC-4626 vault spec
+- update to match nethermind code guidelines
