@@ -137,7 +137,7 @@ func flashloan{syscall_ptr : felt*, pedersen_ptr : HashBuiltin*, range_check_ptr
 
     let (res_end) = uint256_le(pool_balance_value_expected, pool_balance_value_end)
     with_attr error_message("not enough has been returned"):
-        assert res = 1
+        assert res_end = 1
     end
 
     let (ratio) = WadRayMath.wad_div(pool_balance_value_end, pool_balance_value)
